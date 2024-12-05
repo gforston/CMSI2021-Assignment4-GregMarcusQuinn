@@ -1,75 +1,23 @@
 import React, { useState, useEffect } from "react";
-import SearchBar from "./SearchBar"; // Import the SearchBar component
-import api from "./services/apiService";
+import { BalldontlieAPI } from "@balldontlie/sdk";
+import "./App.css";
 
-
-export default function App() {
-  const [players, setPlayers] = useState([]);
+export default function PlayerSearch({ onPlayerSelect }) {
+  const [players, setPlayers] = useState([]); // Players fetched from the initial API
   const [searchQuery, setSearchQuery] = useState("");
-  const [filteredPlayers, setFilteredPlayers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [suggestions, setSuggestions] = useState([]);
+  const [selectedPlayer, setSelectedPlayer] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [selectedPlayerId, setSelectedPlayerId] = useState(null); // State to hold player ID
-  const [cache, setCache] = useState({}); // Cache state
 
-  useEffect(() => {
-    const fetchInitialPlayers = async () => {
-      
-      try {
-        const response = await api.nfl.getSeasonStats({
-          season: 2024,
-        });
-        setPlayers(response.data);
-        setFilteredPlayers(response.data); // Initialize filtered players
+  const api = new BalldontlieAPI({
+    apiKey: "138e5814-bfdf-4194-8aa6-8ff31cc3db17",
+  });
 
-        //error stuff
-      } catch (err) {
-        setError("Failed to fetch initial players");
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    fetchInitialPlayers();
-  }, []);
-
-  const fetchPlayerByName = async () => {
-    if (searchQuery.trim() === "") {
-      // Reset filtered players when the search bar is cleared
-      setFilteredPlayers(players);
-      setSelectedPlayerId(null);
-      return;
-    }
-
-    const query = searchQuery.toLowerCase().trim();
-
-    // Check cache
-    if (cache[query]) {
-      console.log("Serving from cache:", cache[query]);
-      setFilteredPlayers(cache[query]);
-      return;
-    }
-
+  const fetchPlayerByName = async (query) => {
     try {
       setLoading(true);
-
-      const queryParts = query.split(" ");
-      console.log(queryParts);
-      let response;
-
-      if (queryParts.length === 1) {
-        // Only search by either first name or last name
-        response = await api.nfl.getPlayers({ search: query });
-      } else if (queryParts.length >= 2) {
-        // Search by first and last name individually
-        const [firstName, lastName] = queryParts;
-        response = await api.nfl.getPlayers({
-          first_name: firstName,
-          last_name: lastName,
-        });
-      }
-
+      const response = await api.nfl.getPlayers({ search: query });
       const foundPlayers = response.data;
 
       if (foundPlayers.length > 0) {
@@ -92,29 +40,53 @@ export default function App() {
           };
         });
 
-        setFilteredPlayers(combinedData);
-
-        // Cache the result
-        setCache((prevCache) => ({
-          ...prevCache,
-          [query]: combinedData,
-        }));
-
-        // Save player ID if exactly one player matches
-        if (combinedData.length === 1) {
-          setSelectedPlayerId(combinedData[0].player.id);
-        } else {
-          setSelectedPlayerId(null);
-        }
+        setPlayers(combinedData);
+        setSuggestions(combinedData.slice(0, 5)); // Limit to 5 suggestions
       } else {
-        setFilteredPlayers([]);
-        setSelectedPlayerId(null);
+        setPlayers([]);
+        setSuggestions([]);
       }
     } catch (err) {
-      setError("Failed to fetch player by name");
+      setError("Failed to fetch players by name");
       console.error(err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSearchChange = (query) => {
+    setSearchQuery(query);
+
+    // Clear suggestions if search query is empty
+    if (query.trim() === "") {
+      setSuggestions([]);
+      return;
+    }
+
+    // Local filtering for suggestions
+    const filteredSuggestions = players.filter((playerData) => {
+      const fullName =
+        `${playerData.player.first_name} ${playerData.player.last_name}`.toLowerCase();
+      return fullName.includes(query.toLowerCase());
+    });
+
+    setSuggestions(filteredSuggestions.slice(0, 5)); // Limit to 5 suggestions
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter" && searchQuery.trim() !== "") {
+      fetchPlayerByName(searchQuery.trim());
+    }
+  };
+
+  const handleSuggestionClick = (playerData) => {
+    setSelectedPlayer(playerData);
+    setSearchQuery(
+      `${playerData.player.first_name} ${playerData.player.last_name}`
+    );
+    setSuggestions([]);
+    if (onPlayerSelect) {
+      onPlayerSelect(playerData); // Pass the selected player to the parent
     }
   };
 
@@ -124,23 +96,20 @@ export default function App() {
       "Passing Yards": playerData.passing_yards,
       "Passing Yards Per Game": playerData.passing_yards_per_game,
       "Passing Touchdowns": playerData.passing_touchdowns,
-      "Interceptions": playerData.passing_interceptions,
+      Interceptions: playerData.passing_interceptions,
       "Rushing Yards": playerData.rushing_yards,
       "Rushing Touchdowns": playerData.rushing_touchdowns,
       "Rushing Attempts": playerData.rushing_attempts,
       "Receiving Yards": playerData.receiving_yards,
       "Receiving Touchdowns": playerData.receiving_touchdowns,
-      "Receptions": playerData.receptions,
+      Receptions: playerData.receptions,
     };
 
-    // Filter out null or undefined stats
     return Object.entries(stats).filter(
       ([key, value]) => value !== null && value !== undefined
     );
   };
 
-
-  //displaying stuff:
   if (loading) {
     return <div>Loading...</div>;
   }
@@ -148,54 +117,42 @@ export default function App() {
   if (error) {
     return <div>Error: {error}</div>;
   }
-  
+
   return (
-    <div>
-      <h1>Player Stats</h1>
-
-      {/* Search Bar */}
-      <SearchBar 
-        searchQuery={searchQuery} 
-        setSearchQuery={setSearchQuery} 
-        fetchPlayerByName={fetchPlayerByName} // Pass the function as a prop
+    <div className="player-section">
+      <input
+        type="text"
+        className="search-bar"
+        placeholder="Search for a player..."
+        value={searchQuery}
+        onChange={(e) => handleSearchChange(e.target.value)}
+        onKeyDown={handleKeyDown}
       />
-
-      {filteredPlayers.length === 0 ? (
-        <p>No players found for the search term.</p>
-      ) : (
-        <div>
-          {filteredPlayers.map((playerData) => (
-            <div key={playerData.player.id}>
-              <h2>
-                {playerData.player.first_name} {playerData.player.last_name} -{" "}
-                {playerData.player.position}
-              </h2>
-              <p>
-                <strong>Height:</strong> {playerData.player.height}
-              </p>
-              <p>
-                <strong>Weight:</strong> {playerData.player.weight}
-              </p>
-              <p>
-                <strong>College:</strong> {playerData.player.college}
-              </p>
-              <p>
-                <strong>Experience:</strong> {playerData.player.experience}
-              </p>
-              <p>
-                <strong>Age:</strong> {playerData.player.age}
-              </p>
-
-              <h3>Stats for Season 2024</h3>
-              <ul>
-                {getApplicableStats(playerData).map(([statName, statValue]) => (
-                  <li key={statName}>
-                    <strong>{statName}:</strong> {statValue}
-                  </li>
-                ))}
-              </ul>
-            </div>
+      {suggestions.length > 0 && (
+        <ul className="suggestions">
+          {suggestions.map((playerData) => (
+            <li
+              key={playerData.player.id}
+              onClick={() => handleSuggestionClick(playerData)}
+            >
+              {playerData.player.first_name} {playerData.player.last_name}
+            </li>
           ))}
+        </ul>
+      )}
+      {selectedPlayer && (
+        <div className="player-stats">
+          <h2>
+            {selectedPlayer.player.first_name} {selectedPlayer.player.last_name}{" "}
+            - {selectedPlayer.player.position}
+          </h2>
+          <ul>
+            {getApplicableStats(selectedPlayer).map(([statName, statValue]) => (
+              <li key={statName}>
+                <strong>{statName}:</strong> {statValue}
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </div>
